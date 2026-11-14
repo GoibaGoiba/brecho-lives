@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brechó · Controle de Lives</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Barra superior (só aparece no celular) -->
+  <header class="topbar">
+    <button class="icon-btn" data-a="menu" aria-label="Abrir menu">☰</button>
+    <span class="brand-mini">✿ Brechó · Lives</span>
+  </header>
+
+  <!-- Menu lateral -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-flower">✿</span>
+      <div>
+        <strong>Brechó</strong>
+        <small>Controle de Lives</small>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="inicio"><span>🌸</span> Início</button>
+      <button data-view="lives"><span>🎥</span> Lives</button>
+      <button data-view="vendedoras"><span>💁‍♀️</span> Vendedoras</button>
+      <button data-view="resumo"><span>📋</span> Resumo</button>
+      <button data-view="importar" class="owner-only"><span>📥</span> Importar</button>
+      <button data-view="ajustes"><span>⚙️</span> Ajustes</button>
+    </nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+  <div class="backdrop" data-a="menu"></div>
+
+  <!-- Conteúdo -->
+  <main class="main" id="main"></main>
+
+  <div class="modal" id="modal" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <input type="file" id="fileJson" accept=".json,application/json" hidden>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
