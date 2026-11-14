@@ -61,6 +61,12 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.donos where user_id = auth.uid());
 $$;
 
+-- ---------- Permissões da API (as regras RLS abaixo decidem quem pode o quê) ----------
+grant usage on schema public to anon, authenticated;
+grant select on public.ajustes, public.vendedoras, public.lives, public.pecas, public.gastos to anon, authenticated;
+grant insert, update, delete on public.ajustes, public.vendedoras, public.lives, public.pecas, public.gastos to authenticated;
+grant select on public.donos to authenticated;
+
 -- ---------- Segurança (RLS) ----------
 -- Qualquer pessoa com o link VÊ os dados; só donos logados EDITAM.
 do $$

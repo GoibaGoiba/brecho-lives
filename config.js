@@ -5,6 +5,6 @@
    NUNCA coloque aqui a chave "service_role"/"secret" nem a senha do banco.
    Com os dois campos vazios, o site funciona só neste navegador (localStorage). */
 window.BRECHO_CONFIG = {
-  supabaseUrl: '',
-  supabaseKey: '',
+  supabaseUrl: 'https://kxqnjkgmqosdztyoctum.supabase.co',
+  supabaseKey: 'sb_publishable_7zWxt2kZM6slmr7QSfdN-Q__ooU-iy2',
 };
