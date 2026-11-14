@@ -152,7 +152,6 @@ function calcLive(live) {
     venda, taxas, recebido, pag, gastos, custo, lucro: recebido - custo - pag - gastos,
     // o que aparece como "taxas" e "recebido" para quem não é dono: o preço pago entra junto das taxas
     taxasV: veCusto() ? taxas : taxas + custo, recebidoV: veCusto() ? recebido : recebido - custo,
-    vendSemCusto: veCusto() ? vend.filter(p => p.custo == null).length : 0,
     nVend, nDev, nPend: live.pecas.length - nVend - nDev, nTotal: live.pecas.length,
     totalCad: sum(live.pecas.map(p => p.valor)), semValor: live.pecas.filter(p => p.valor == null).length,
     ticket: nVend ? venda / nVend : 0,
@@ -216,7 +215,7 @@ function painel(de, ate) {
   return {
     lives, cs, ranking,
     venda: t('venda'), recebido: t('recebido'), lucro: t('lucro'), taxas: t('taxas'), pag: t('pag'), gastos: t('gastos'),
-    custo: t('custo'), vendSemCusto: t('vendSemCusto'), taxasV: t('taxasV'), recebidoV: t('recebidoV'),
+    custo: t('custo'), taxasV: t('taxasV'), recebidoV: t('recebidoV'),
     nVend, nDev, nPend: t('nPend'), devPct: (nVend + nDev) ? nDev / (nVend + nDev) : 0,
     ticket: nVend ? t('venda') / nVend : 0,
   };
@@ -288,9 +287,7 @@ function viewInicio() {
     ${kpi('💖 Lucro final', P.lucro, 'hero', 'recebido − comissões − gastos')}
     ${kpi('🛍️ Venda total', P.venda, 'lilac', 'soma das peças vendidas')}
     ${kpi('🌸 Valor recebido', P.venda - P.taxas - P.custo, 'pink', 'depois das taxas da plataforma')}
-    ${kpi('🏷️ Taxas da plataforma', P.taxas + P.custo, 'peach', veCusto()
-      ? `preço pago das peças vendidas${taxa ? ` + taxa de ${numFmt(taxa)}%` : ''}${P.vendSemCusto ? ` · ${P.vendSemCusto} vendida(s) sem preço pago` : ''}`
-      : 'sobre as peças vendidas')}
+    ${kpi('🏷️ Taxas da plataforma', P.taxas + P.custo, 'peach', 'sobre as peças vendidas')}
     ${kpi('💁‍♀️ Comissões pagas', P.pag, 'lilac', 'pagamento das vendedoras')}
     ${kpi('⛽ Gastos', P.gastos, 'peach', 'gasolina, transporte…')}
   </section>
@@ -464,7 +461,7 @@ function viewLive() {
         ${fin(`(–) Taxas da plataforma ${taxa ? `(${numFmt(taxa)}%)` : '(sem taxa)'}`, c.taxas)}
         ${fin('Valor recebido (após taxas)', c.recebido)}
         ${fin('(–) Preço pago das peças vendidas', c.custo)}
-        ${c.vendSemCusto ? `<p class="small muted" style="margin:2px 4px 6px">${c.vendSemCusto} peça(s) vendida(s) ainda sem preço pago — contam como R$ 0.</p>` : ''}` : `
+` : `
         ${fin('(–) Taxas da plataforma', c.taxasV)}
         ${fin('Valor recebido (após taxas)', c.recebidoV)}`}
         ${fin('(–) Pagamento da vendedora', c.pag)}
