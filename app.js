@@ -93,18 +93,22 @@ function load() {
   return freshState();
 }
 function save() {
+  if (CLOUD) return Cloud.schedule(); // nuvem: envia só o que mudou
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { toast('⚠️ O navegador não deixou salvar. Use Exportar JSON para não perder os dados.'); }
 }
 
-let state = load();
+/** true quando config.js tem os dados do Supabase: dados na nuvem + login de verdade. */
+const CLOUD = typeof Cloud !== 'undefined' && Cloud.on;
+let state = CLOUD ? { version: 1, settings: { taxa: null, faixas: [30, 50, 80, 120, 200], pinHash: null }, vendedoras: [], lives: [] } : load();
 const ui = {
   view: 'inicio', liveId: null, de: '', ate: '',
   busca: '', fStatus: '', fCat: '',
   importText: '', importRows: [], importLive: '',
   owner: false, undo: null, focusK: null,
+  loading: CLOUD, loadError: '',
 };
-try { ui.owner = sessionStorage.getItem(OWNER_KEY) === '1' && !!state.settings.pinHash; } catch (e) { }
+if (!CLOUD) try { ui.owner = sessionStorage.getItem(OWNER_KEY) === '1' && !!state.settings.pinHash; } catch (e) { }
 
 const vendById = id => state.vendedoras.find(v => v.id === id);
 const liveById = id => state.lives.find(l => l.id === id);
@@ -600,24 +604,36 @@ function viewAjustes() {
   <div class="grid-2">
     <section class="card">
       <h2>✿ Acesso</h2>
-      <p>Você está no <b>${ui.owner ? 'modo dono' : 'modo visitante'}</b>. ${ui.owner ? 'Pode editar tudo.' : 'Só visualização — nada pode ser alterado.'}</p>
+      <p>Você está no <b>${ui.owner ? 'modo dono' : 'modo visitante'}</b>${CLOUD && Cloud.user ? ` (${esc(Cloud.user.email)})` : ''}. ${ui.owner ? 'Pode editar tudo.' : 'Só visualização — nada pode ser alterado.'}</p>
       <div class="toolbar">
-        ${ui.owner ? '<button class="btn soft" data-a="changePin">Trocar PIN</button><button class="btn ghost" data-a="logout">Sair do modo dono</button>' : `<button class="btn" data-a="login">${state.settings.pinHash ? 'Entrar como dono' : 'Criar PIN do dono'}</button>`}
+        ${CLOUD
+          ? (Cloud.user ? '<button class="btn ghost" data-a="logout">Sair</button>' : '<button class="btn" data-a="login">Entrar como dono</button>')
+          : (ui.owner ? '<button class="btn soft" data-a="changePin">Trocar PIN</button><button class="btn ghost" data-a="logout">Sair do modo dono</button>' : `<button class="btn" data-a="login">${state.settings.pinHash ? 'Entrar como dono' : 'Criar PIN do dono'}</button>`)}
       </div>
-      <div class="note-box">🔐 O PIN é só uma <b>barreira leve</b> dentro do navegador, para evitar edição sem querer. Não é segurança de verdade: quem tiver acesso ao computador ou ao arquivo consegue contornar. Login de verdade (e-mail/senha, vendedora vendo só a live dela) fica para uma fase futura com Firebase/Supabase.</div>
+      ${CLOUD
+        ? '<div class="note-box">🔐 Login com e-mail e senha do Supabase. Quem não entra só consegue ver; as regras de edição ficam no próprio banco de dados, não no navegador.</div>'
+        : '<div class="note-box">🔐 O PIN é só uma <b>barreira leve</b> dentro do navegador, para evitar edição sem querer. Não é segurança de verdade. Para login de verdade e dados na nuvem, preencha o <code>config.js</code> com os dados do Supabase.</div>'}
     </section>
     <section class="card">
       <h2>✿ Dados e backup</h2>
-      <p class="small muted">Os dados ficam salvos <b>neste navegador, neste computador</b>. Faça backups com frequência. Para alguém ver suas lives, envie o arquivo JSON — a pessoa abre o site e clica em "Abrir arquivo de dados".</p>
+      <p class="small muted">${CLOUD
+        ? 'Os dados ficam salvos <b>na nuvem (Supabase)</b> e aparecem iguais em qualquer computador ou celular. Mesmo assim, exporte um backup de vez em quando.'
+        : 'Os dados ficam salvos <b>neste navegador, neste computador</b>. Faça backups com frequência. Para alguém ver suas lives, envie o arquivo JSON — a pessoa abre o site e clica em "Abrir arquivo de dados".'}</p>
       <div class="toolbar">
         <button class="btn lilac" data-a="exportJson">⬇️ Exportar JSON</button>
-        <button class="btn soft" data-a="importJson">📂 Abrir arquivo de dados</button>
+        <button class="btn soft ${CLOUD ? 'owner-only' : ''}" data-a="importJson">📂 ${CLOUD ? 'Restaurar de um backup' : 'Abrir arquivo de dados'}</button>
         <button class="btn soft" data-a="exportXlsx">📊 Exportar planilha (.xlsx)</button>
       </div>
       <div class="toolbar owner-only"><button class="btn danger sm" data-a="reset">Restaurar estado inicial</button></div>
       <p class="small muted owner-only">Restaurar apaga vendedoras, lives, gastos e status e volta para Live 01 e Live 02 com as 220 peças originais.</p>
     </section>
   </div>`;
+}
+
+function viewCarregando() {
+  return ui.loadError
+    ? empty('⚠️', `Não consegui carregar os dados da nuvem.<br><span class="small">${esc(ui.loadError)}</span>`, '<div style="margin-top:12px"><button class="btn sm" data-a="recarregar">Tentar de novo</button></div>')
+    : empty('☁️', 'Carregando os dados do brechó…');
 }
 
 /* ================= Render ================= */
@@ -627,7 +643,10 @@ function renderSide() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view || (ui.view === 'live' && b.dataset.view === 'lives')));
   $('#sideFoot').innerHTML = `<div class="mode-box">
     <span class="badge ${ui.owner ? 'owner' : ''}">${ui.owner ? '🔓 Modo dono' : '👀 Modo visitante'}</span>
-    ${ui.owner ? '<button class="btn ghost sm block" data-a="logout">Sair do modo dono</button>' : `<button class="btn sm block" data-a="login">${state.settings.pinHash ? 'Entrar como dono' : 'Criar PIN do dono'}</button>`}
+    ${CLOUD ? `<div style="margin-bottom:8px">${Cloud.badge()}</div>` : ''}
+    ${CLOUD
+      ? (Cloud.user ? '<button class="btn ghost sm block" data-a="logout">Sair</button>' : '<button class="btn sm block" data-a="login">Entrar como dono</button>')
+      : (ui.owner ? '<button class="btn ghost sm block" data-a="logout">Sair do modo dono</button>' : `<button class="btn sm block" data-a="login">${state.settings.pinHash ? 'Entrar como dono' : 'Criar PIN do dono'}</button>`)}
   </div>
   <button class="btn soft sm block" data-a="exportJson">⬇️ Exportar backup</button>`;
 }
@@ -641,7 +660,7 @@ function render() {
   ui.focusK = null;
   const sy = window.scrollY;
   destroyCharts();
-  const [view, after] = VIEWS[ui.view] || VIEWS.inicio;
+  const [view, after] = ui.loading || ui.loadError ? [viewCarregando] : (VIEWS[ui.view] || VIEWS.inicio);
   $('#main').innerHTML = view();
   renderSide();
   after && after();
@@ -808,9 +827,13 @@ const ACTIONS = {
     save(); toast(`${n} peças adicionadas em ${esc(l.nome)} ✿`);
     ACTIONS.openLive({ id: l.id });
   },
-  login: () => state.settings.pinHash ? askPin() : createPin(false),
+  login: () => CLOUD ? loginCloud() : state.settings.pinHash ? askPin() : createPin(false),
   changePin: () => createPin(true),
-  logout: () => { ui.owner = false; try { sessionStorage.removeItem(OWNER_KEY); } catch (e) { } render(); toast('Modo visitante ✿'); },
+  logout: async () => {
+    if (CLOUD) { await Cloud.logout(); toast('Você saiu ✿'); return; }
+    ui.owner = false; try { sessionStorage.removeItem(OWNER_KEY); } catch (e) { } render(); toast('Modo visitante ✿');
+  },
+  recarregar: () => location.reload(),
   exportJson: () => {
     const data = clone(state); delete data.settings.pinHash;
     download(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `brecho-lives-${today()}.json`);
@@ -895,6 +918,18 @@ function createPin(trocar) {
     },
   });
 }
+function loginCloud() {
+  modal({
+    title: 'Entrar como dono',
+    body: `<label class="field"><span>E-mail</span><input class="in" id="lEmail" type="email" autocomplete="username"></label>
+      <label class="field"><span>Senha</span><input class="in" id="lSenha" type="password" autocomplete="current-password"></label>`,
+    ok: 'Entrar',
+    onOk: async m => {
+      const err = await Cloud.login($('#lEmail', m).value.trim(), $('#lSenha', m).value);
+      if (err) { $('#mErr', m).textContent = err; return false; }
+    },
+  });
+}
 function askPin() {
   modal({
     title: 'Entrar como dono',
@@ -918,12 +953,13 @@ function download(blob, name) {
 function readJsonFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
+  if (CLOUD && !ui.owner) return toast('Só o dono pode restaurar dados.');
   const rd = new FileReader();
   rd.onload = () => {
     let d;
     try { d = JSON.parse(rd.result); } catch (e) { return toast('Arquivo inválido: não é um JSON.'); }
     if (!d || !Array.isArray(d.lives)) return toast('Esse arquivo não parece um backup do brechó.');
-    confirmDlg('Abrir este arquivo de dados?', `<b>${esc(file.name)}</b> tem ${d.lives.length} lives e ${(d.vendedoras || []).length} vendedoras. Os dados atuais deste navegador serão substituídos.`, () => {
+    confirmDlg('Abrir este arquivo de dados?', `<b>${esc(file.name)}</b> tem ${d.lives.length} lives e ${(d.vendedoras || []).length} vendedoras. ${CLOUD ? "Os dados atuais da nuvem serão substituídos para todos os aparelhos." : "Os dados atuais deste navegador serão substituídos."}`, () => {
       const pin = state.settings.pinHash;
       state = normalize(d); state.settings.pinHash = pin;
       ui.view = 'inicio'; commit(); toast('Dados carregados ✿');
@@ -956,3 +992,4 @@ function exportXlsx() {
 
 /* ================= Início ================= */
 render();
+if (CLOUD) Cloud.init();
