@@ -84,6 +84,7 @@ const Cloud = (() => {
     const out = {};
     for (const t of PARENTS_FIRST) {
       const rows = [];
+      if (t === 'pecas_custo' && !isOwner) { out[t] = rows; continue; }   // visitante: nem pede o preço pago
       for (let from = 0; ; from += 1000) {
         const { data, error } = await sb.from(t).select('*').order(ORDER(t)).range(from, from + 999);
         if (error) throw error;

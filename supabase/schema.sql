@@ -93,6 +93,7 @@ create policy "dono se ve" on public.donos for select to authenticated using (us
 
 -- ---------- Preço pago: só o dono lê/edita; visitante recebe só a soma por live ----------
 revoke all on public.pecas_custo from anon;
+grant select on public.pecas_custo to anon;            -- pode consultar, mas a RLS abaixo devolve ZERO linhas
 grant select, insert, update, delete on public.pecas_custo to authenticated;
 alter table public.pecas_custo enable row level security;
 drop policy if exists "so donos" on public.pecas_custo;
