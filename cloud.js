@@ -21,7 +21,7 @@ const Cloud = (() => {
     st.vendedoras.forEach((v, i) => r.vendedoras.set(v.id, { id: v.id, nome: v.nome || '', modelo: v.modelo || '', pct: v.pct ?? null, fixo: v.fixo ?? null, por_hora: v.porHora ?? null, obs: v.obs || '', ordem: i }));
     st.lives.forEach((l, i) => {
       r.lives.set(l.id, { id: l.id, nome: l.nome || '', data: l.data || null, vendedora_id: l.vendedoraId || null, horas: l.horas ?? null, ordem: i });
-      l.pecas.forEach((p, j) => r.pecas.set(p.id, { id: p.id, live_id: l.id, ref: p.ref || null, nome: p.nome || '', categoria: p.categoria || '', valor: p.valor ?? null, status: p.status || '', ordem: j }));
+      l.pecas.forEach((p, j) => r.pecas.set(p.id, { id: p.id, live_id: l.id, ref: p.ref || null, nome: p.nome || '', categoria: p.categoria || '', valor: p.valor ?? null, custo: p.custo ?? null, status: p.status || '', ordem: j }));
       l.gastos.forEach((g, j) => r.gastos.set(g.id, { id: g.id, live_id: l.id, descricao: g.desc || '', valor: g.valor ?? null, ordem: j }));
     });
     return r;
@@ -37,7 +37,7 @@ const Cloud = (() => {
     };
     const lv = new Map(st.lives.map(l => [l.id, l]));
     d.pecas.sort(byOrd).forEach(p => {
-      const p2 = { id: p.id, nome: p.nome, categoria: p.categoria, valor: num(p.valor), status: p.status };
+      const p2 = { id: p.id, nome: p.nome, categoria: p.categoria, valor: num(p.valor), custo: num(p.custo), status: p.status };
       if (p.ref) p2.ref = p.ref;
       lv.get(p.live_id)?.pecas.push(p2);
     });

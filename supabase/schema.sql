@@ -36,10 +36,12 @@ create table if not exists public.pecas (
   nome       text not null default '',
   categoria  text not null default '',
   valor      numeric,
+  custo      numeric,                               -- preço pago pela peça
   status     text not null default '',               -- 'Vendida' | 'Devolvida' | ''
   ordem      int not null default 0
 );
 create index if not exists pecas_live_idx on public.pecas(live_id);
+alter table public.pecas add column if not exists custo numeric;   -- para bancos criados antes da coluna existir
 
 create table if not exists public.gastos (
   id         text primary key,
