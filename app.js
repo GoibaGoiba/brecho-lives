@@ -132,6 +132,9 @@ function descPagamento(v) {
   return parts.join(' + ') || 'valores em branco';
 }
 
+/** Preço pago das peças só aparece para o dono (modo edição). */
+const veCusto = () => !!ui.owner;
+
 function calcLive(live) {
   const taxa = (state.settings.taxa || 0) / 100;
   const vend = live.pecas.filter(p => p.status === 'Vendida');
@@ -140,12 +143,16 @@ function calcLive(live) {
   const recebido = venda - taxas;
   const pag = pagamento(vendById(live.vendedoraId), live.horas, venda);
   const gastos = sum(live.gastos.map(g => g.valor));
-  const custo = sum(vend.map(p => p.custo));                       // preço pago pelas peças vendidas
+  // Preço pago pelas peças vendidas. Na nuvem, visitante não recebe o custo de cada peça (o banco só entrega
+  // a soma por live, via custos_por_live) — então usa a soma; o dono soma peça a peça.
+  const custo = CLOUD && !ui.owner ? ((state.custosLive || {})[live.id] || 0) : sum(vend.map(p => p.custo));
   const nVend = vend.length;
   const nDev = live.pecas.filter(p => p.status === 'Devolvida').length;
   return {
     venda, taxas, recebido, pag, gastos, custo, lucro: recebido - custo - pag - gastos,
-    vendSemCusto: vend.filter(p => p.custo == null).length,
+    // o que aparece como "taxas" e "recebido" para quem não é dono: o preço pago entra junto das taxas
+    taxasV: veCusto() ? taxas : taxas + custo, recebidoV: veCusto() ? recebido : recebido - custo,
+    vendSemCusto: veCusto() ? vend.filter(p => p.custo == null).length : 0,
     nVend, nDev, nPend: live.pecas.length - nVend - nDev, nTotal: live.pecas.length,
     totalCad: sum(live.pecas.map(p => p.valor)), semValor: live.pecas.filter(p => p.valor == null).length,
     ticket: nVend ? venda / nVend : 0,
@@ -209,7 +216,7 @@ function painel(de, ate) {
   return {
     lives, cs, ranking,
     venda: t('venda'), recebido: t('recebido'), lucro: t('lucro'), taxas: t('taxas'), pag: t('pag'), gastos: t('gastos'),
-    custo: t('custo'), vendSemCusto: t('vendSemCusto'),
+    custo: t('custo'), vendSemCusto: t('vendSemCusto'), taxasV: t('taxasV'), recebidoV: t('recebidoV'),
     nVend, nDev, nPend: t('nPend'), devPct: (nVend + nDev) ? nDev / (nVend + nDev) : 0,
     ticket: nVend ? t('venda') / nVend : 0,
   };
@@ -278,11 +285,12 @@ function viewInicio() {
     </div>
   </header>
   <section class="kpis">
-    ${kpi('💖 Lucro final', P.lucro, 'hero', 'recebido − preço pago − comissões − gastos')}
+    ${kpi('💖 Lucro final', P.lucro, 'hero', 'recebido − comissões − gastos')}
     ${kpi('🛍️ Venda total', P.venda, 'lilac', 'soma das peças vendidas')}
-    ${kpi('🧾 Preço pago das peças', P.custo, 'pink', P.vendSemCusto ? `${P.vendSemCusto} vendida(s) sem preço pago` : 'o que as peças vendidas custaram')}
-    ${kpi('🌸 Valor recebido', P.recebido, 'pink', 'depois das taxas da plataforma')}
-    ${kpi('🏷️ Taxas da plataforma', P.taxas, 'peach', taxa ? `${numFmt(taxa)}% sobre a venda` : 'sem taxa definida')}
+    ${kpi('🌸 Valor recebido', P.venda - P.taxas - P.custo, 'pink', 'depois das taxas da plataforma')}
+    ${kpi('🏷️ Taxas da plataforma', P.taxas + P.custo, 'peach', veCusto()
+      ? `preço pago das peças vendidas${taxa ? ` + taxa de ${numFmt(taxa)}%` : ''}${P.vendSemCusto ? ` · ${P.vendSemCusto} vendida(s) sem preço pago` : ''}`
+      : 'sobre as peças vendidas')}
     ${kpi('💁‍♀️ Comissões pagas', P.pag, 'lilac', 'pagamento das vendedoras')}
     ${kpi('⛽ Gastos', P.gastos, 'peach', 'gasolina, transporte…')}
   </section>
@@ -300,7 +308,7 @@ function viewInicio() {
       ${ranking}
     </div>
     <div class="card">
-      <h2>✿ Venda, preço pago e lucro por vendedora</h2>
+      <h2>✿ Venda, ${veCusto() ? 'preço pago' : 'taxas'} e lucro por vendedora</h2>
       ${P.ranking.length ? '<div class="chart-box"><canvas id="chVend"></canvas></div>' : empty('📊', 'O gráfico aparece quando houver lives com vendedora.')}
     </div>
   </section>
@@ -313,12 +321,12 @@ function chartsInicio() {
   const P = painel(ui.de, ui.ate);
   if (P.ranking.length) barChart('chVend', P.ranking.map(r => r.v.nome || 'Sem nome'), [
     { label: 'Venda', data: P.ranking.map(r => r.venda), backgroundColor: C.lilac },
-    { label: 'Preço pago', data: P.ranking.map(r => r.custo), backgroundColor: C.peach },
+    { label: veCusto() ? 'Preço pago' : 'Taxas', data: P.ranking.map(r => r.custo), backgroundColor: C.peach },
     { label: 'Lucro', data: P.ranking.map(r => r.lucro), backgroundColor: C.pink },
   ]);
   if (P.lives.length) barChart('chLives', P.cs.map(x => x.l.nome), [
     { label: 'Venda', data: P.cs.map(x => x.c.venda), backgroundColor: C.lilac },
-    { label: 'Preço pago', data: P.cs.map(x => x.c.custo), backgroundColor: C.peach },
+    { label: veCusto() ? 'Preço pago' : 'Taxas', data: P.cs.map(x => x.c.custo + (veCusto() ? 0 : x.c.taxas)), backgroundColor: C.peach },
     { label: 'Lucro', data: P.cs.map(x => x.c.lucro), backgroundColor: C.pink },
   ]);
 }
@@ -400,7 +408,7 @@ function viewLive() {
       <td style="min-width:260px"><input class="in" data-f="p:${l.id}:${p.id}:nome" data-k="p-${p.id}-nome" value="${esc(p.nome)}" placeholder="Nome da peça" ${RO()}></td>
       <td style="min-width:132px"><select class="in" data-f="p:${l.id}:${p.id}:categoria" data-k="p-${p.id}-cat" ${RO()}>${optList(CATS, p.categoria, '—')}</select></td>
       <td style="min-width:96px;width:110px"><input class="in money ${p.valor == null ? 'warn' : ''}" inputmode="decimal" placeholder="sem valor" data-f="p:${l.id}:${p.id}:valor" data-k="p-${p.id}-valor" value="${fmtIn(p.valor)}" ${RO()}></td>
-      <td style="min-width:96px;width:110px"><input class="in money" inputmode="decimal" placeholder="—" title="Quanto o brechó pagou por esta peça" data-f="p:${l.id}:${p.id}:custo" data-k="p-${p.id}-custo" value="${fmtIn(p.custo)}" ${RO()}></td>
+      <td class="owner-only" style="min-width:96px;width:110px"><input class="in money" inputmode="decimal" placeholder="—" title="Quanto o brechó pagou por esta peça (só o dono vê)" data-f="p:${l.id}:${p.id}:custo" data-k="p-${p.id}-custo" value="${fmtIn(p.custo)}" ${RO()}></td>
       <td class="nowrap"><span class="st">
         <button class="v ${p.status === 'Vendida' ? 'on' : ''}" data-a="status" data-live="${l.id}" data-id="${p.id}" data-s="Vendida" data-k="st-${p.id}-v" ${RO()}>Vendida</button>
         <button class="d ${p.status === 'Devolvida' ? 'on' : ''}" data-a="status" data-live="${l.id}" data-id="${p.id}" data-s="Devolvida" data-k="st-${p.id}-d" ${RO()}>Devolvida</button>
@@ -441,7 +449,7 @@ function viewLive() {
       </div>
       <p class="small muted" style="margin:0 0 8px">${rows.length === l.pecas.length ? `${rows.length} peças` : `${rows.length} de ${l.pecas.length} peças (filtro ativo)`}</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>Peça</th><th>Categoria</th><th class="right">Preço de venda</th><th class="right">Preço pago</th><th>Status</th><th class="owner-only"></th></tr></thead>
+        <thead><tr><th>#</th><th>Peça</th><th>Categoria</th><th class="right">Preço de venda</th><th class="right owner-only">Preço pago</th><th>Status</th><th class="owner-only"></th></tr></thead>
         <tbody>${tbody || `<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Nenhuma peça ${l.pecas.length ? 'com esse filtro' : 'nesta live'}.</td></tr>`}</tbody>
       </table></div>
     </section>
@@ -452,10 +460,13 @@ function viewLive() {
         ${fin('Peças vendidas', `${c.nVend}`)}
         ${fin('Peças devolvidas', `${c.nDev}`)}
         ${fin('VENDA TOTAL', c.venda, 'strong')}
+        ${veCusto() ? `
         ${fin(`(–) Taxas da plataforma ${taxa ? `(${numFmt(taxa)}%)` : '(sem taxa)'}`, c.taxas)}
         ${fin('Valor recebido (após taxas)', c.recebido)}
         ${fin('(–) Preço pago das peças vendidas', c.custo)}
-        ${c.vendSemCusto ? `<p class="small muted" style="margin:2px 4px 6px">${c.vendSemCusto} peça(s) vendida(s) ainda sem preço pago — contam como R$ 0.</p>` : ''}
+        ${c.vendSemCusto ? `<p class="small muted" style="margin:2px 4px 6px">${c.vendSemCusto} peça(s) vendida(s) ainda sem preço pago — contam como R$ 0.</p>` : ''}` : `
+        ${fin('(–) Taxas da plataforma', c.taxasV)}
+        ${fin('Valor recebido (após taxas)', c.recebidoV)}`}
         ${fin('(–) Pagamento da vendedora', c.pag)}
         ${fin('(–) Gastos', c.gastos)}
         ${fin('💖 LUCRO FINAL', c.lucro, 'total')}
@@ -503,13 +514,13 @@ function viewResumo() {
   return `
   <header class="page-head"><div><h1>✿ Resumo das lives</h1><p class="sub">Tabela consolidada de todas as lives — é ela que alimenta o painel inicial.</p></div></header>
   <section class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Live</th><th>Data</th><th>Vendedora</th><th class="right">Vendidas</th><th class="right">Devolvidas</th><th class="right">Venda total</th><th class="right">Taxas</th><th class="right">Recebido</th><th class="right">Preço pago</th><th class="right">Pag. vendedora</th><th class="right">Gastos</th><th class="right">Lucro final</th></tr></thead>
+    <thead><tr><th>Live</th><th>Data</th><th>Vendedora</th><th class="right">Vendidas</th><th class="right">Devolvidas</th><th class="right">Venda total</th><th class="right">Taxas</th><th class="right">Recebido</th><th class="right owner-only">Preço pago</th><th class="right">Pag. vendedora</th><th class="right">Gastos</th><th class="right">Lucro final</th></tr></thead>
     <tbody>${cs.map(({ l, c }) => `<tr class="clickable" data-a="openLive" data-id="${l.id}">
       <td><b>${esc(l.nome)}</b></td><td class="nowrap">${dateBR(l.data)}</td><td>${esc(vendById(l.vendedoraId)?.nome || '—')}</td>
-      <td class="right">${c.nVend}</td><td class="right">${c.nDev}</td><td class="right nowrap">${money(c.venda)}</td><td class="right nowrap">${money(c.taxas)}</td>
-      <td class="right nowrap">${money(c.recebido)}</td><td class="right nowrap">${money(c.custo)}</td><td class="right nowrap">${money(c.pag)}</td><td class="right nowrap">${money(c.gastos)}</td>
+      <td class="right">${c.nVend}</td><td class="right">${c.nDev}</td><td class="right nowrap">${money(c.venda)}</td><td class="right nowrap">${money(c.taxasV)}</td>
+      <td class="right nowrap">${money(c.recebidoV)}</td><td class="right nowrap owner-only">${money(c.custo)}</td><td class="right nowrap">${money(c.pag)}</td><td class="right nowrap">${money(c.gastos)}</td>
       <td class="right nowrap ${c.lucro < 0 ? 'neg' : ''}"><b>${money(c.lucro)}</b></td></tr>`).join('') || '<tr><td colspan="12" class="muted">Nenhuma live.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="3">Total (${cs.length} lives)</td><td class="right">${t('nVend')}</td><td class="right">${t('nDev')}</td><td class="right nowrap">${money(t('venda'))}</td><td class="right nowrap">${money(t('taxas'))}</td><td class="right nowrap">${money(t('recebido'))}</td><td class="right nowrap">${money(t('custo'))}</td><td class="right nowrap">${money(t('pag'))}</td><td class="right nowrap">${money(t('gastos'))}</td><td class="right nowrap ${t('lucro') < 0 ? 'neg' : ''}">${money(t('lucro'))}</td></tr></tfoot>
+    <tfoot><tr><td colspan="3">Total (${cs.length} lives)</td><td class="right">${t('nVend')}</td><td class="right">${t('nDev')}</td><td class="right nowrap">${money(t('venda'))}</td><td class="right nowrap">${money(t('taxasV'))}</td><td class="right nowrap">${money(t('recebidoV'))}</td><td class="right nowrap owner-only">${money(t('custo'))}</td><td class="right nowrap">${money(t('pag'))}</td><td class="right nowrap">${money(t('gastos'))}</td><td class="right nowrap ${t('lucro') < 0 ? 'neg' : ''}">${money(t('lucro'))}</td></tr></tfoot>
   </table></div></section>`;
 }
 
@@ -845,6 +856,7 @@ const ACTIONS = {
   recarregar: () => location.reload(),
   exportJson: () => {
     const data = clone(state); delete data.settings.pinHash;
+    if (!veCusto()) data.lives.forEach(l => l.pecas.forEach(p => delete p.custo));   // visitante não leva o preço pago
     download(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `brecho-lives-${today()}.json`);
   },
   importJson: () => { const f = $('#fileJson'); f.value = ''; f.click(); },
@@ -981,8 +993,9 @@ function exportXlsx() {
   const wb = XLSX.utils.book_new();
   const used = new Set();
   const sheetName = n => { let s = n.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Aba'; let i = 2; while (used.has(s)) s = s.slice(0, 28) + ' ' + i++; used.add(s); return s; };
-  const res = [['Live', 'Data', 'Vendedora', 'Peças vendidas', 'Peças devolvidas', 'Venda total', 'Taxas', 'Recebido (após taxas)', 'Preço pago das peças', 'Pagamento vendedora', 'Gastos', 'Lucro final']];
-  state.lives.forEach(l => { const c = calcLive(l); res.push([l.nome, l.data ? dateBR(l.data) : '', vendById(l.vendedoraId)?.nome || '', c.nVend, c.nDev, c.venda, c.taxas, c.recebido, c.custo, c.pag, c.gastos, c.lucro]); });
+  const dono = veCusto();   // visitante: sem preço pago (vai somado em "Taxas"), sem coluna por peça
+  const res = [['Live', 'Data', 'Vendedora', 'Peças vendidas', 'Peças devolvidas', 'Venda total', 'Taxas', 'Recebido (após taxas)', ...(dono ? ['Preço pago das peças'] : []), 'Pagamento vendedora', 'Gastos', 'Lucro final']];
+  state.lives.forEach(l => { const c = calcLive(l); res.push([l.nome, l.data ? dateBR(l.data) : '', vendById(l.vendedoraId)?.nome || '', c.nVend, c.nDev, c.venda, c.taxasV, c.recebidoV, ...(dono ? [c.custo] : []), c.pag, c.gastos, c.lucro]); });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(res), sheetName('Resumo'));
   const vs = [['Nome', 'Modelo de pagamento', '% sobre a venda', 'Valor fechado por live', 'Valor por hora', 'Observações']];
   state.vendedoras.forEach(v => vs.push([v.nome, v.modelo, v.pct, v.fixo, v.porHora, v.obs]));
@@ -990,9 +1003,9 @@ function exportXlsx() {
   state.lives.forEach(l => {
     const c = calcLive(l);
     const rows = [[l.nome], ['Data', l.data ? dateBR(l.data) : ''], ['Vendedora', vendById(l.vendedoraId)?.nome || ''], ['Horas', l.horas],
-      ['Venda total', c.venda], ['Taxas', c.taxas], ['Recebido', c.recebido], ['Preço pago das peças', c.custo], ['Pagamento vendedora', c.pag], ['Gastos', c.gastos], ['Lucro final', c.lucro], [],
-      ['#', 'Peça', 'Categoria', 'Preço de venda (R$)', 'Preço pago (R$)', 'Status']];
-    l.pecas.forEach((p, i) => rows.push([i + 1, p.nome, p.categoria, p.valor, p.custo, p.status]));
+      ['Venda total', c.venda], ['Taxas', c.taxasV], ['Recebido', c.recebidoV], ...(dono ? [['Preço pago das peças', c.custo]] : []), ['Pagamento vendedora', c.pag], ['Gastos', c.gastos], ['Lucro final', c.lucro], [],
+      ['#', 'Peça', 'Categoria', 'Preço de venda (R$)', ...(dono ? ['Preço pago (R$)'] : []), 'Status']];
+    l.pecas.forEach((p, i) => rows.push([i + 1, p.nome, p.categoria, p.valor, ...(dono ? [p.custo] : []), p.status]));
     if (l.gastos.length) { rows.push([], ['Gastos', 'Valor (R$)']); l.gastos.forEach(g => rows.push([g.desc, g.valor])); }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName(l.nome));
   });

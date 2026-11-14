@@ -36,12 +36,16 @@ create table if not exists public.pecas (
   nome       text not null default '',
   categoria  text not null default '',
   valor      numeric,
-  custo      numeric,                               -- preço pago pela peça
   status     text not null default '',               -- 'Vendida' | 'Devolvida' | ''
   ordem      int not null default 0
 );
 create index if not exists pecas_live_idx on public.pecas(live_id);
-alter table public.pecas add column if not exists custo numeric;   -- para bancos criados antes da coluna existir
+
+-- Preço pago de cada peça: tabela separada que SÓ O DONO lê (o visitante vê só a soma por live).
+create table if not exists public.pecas_custo (
+  peca_id  text primary key references public.pecas(id) on delete cascade,
+  custo    numeric
+);
 
 create table if not exists public.gastos (
   id         text primary key,
@@ -87,11 +91,28 @@ alter table public.donos enable row level security;
 drop policy if exists "dono se ve" on public.donos;
 create policy "dono se ve" on public.donos for select to authenticated using (user_id = auth.uid());
 
+-- ---------- Preço pago: só o dono lê/edita; visitante recebe só a soma por live ----------
+revoke all on public.pecas_custo from anon;
+grant select, insert, update, delete on public.pecas_custo to authenticated;
+alter table public.pecas_custo enable row level security;
+drop policy if exists "so donos" on public.pecas_custo;
+create policy "so donos" on public.pecas_custo for all to authenticated using (public.e_dono()) with check (public.e_dono());
+
+create or replace function public.custos_por_live() returns table (live_id text, custo numeric)
+language sql stable security definer set search_path = public as $$
+  select p.live_id, coalesce(sum(c.custo), 0)
+  from public.pecas p join public.pecas_custo c on c.peca_id = p.id
+  where p.status = 'Vendida'
+  group by p.live_id;
+$$;
+revoke all on function public.custos_por_live() from public;
+grant execute on function public.custos_por_live() to anon, authenticated;
+
 -- ---------- Atualização ao vivo entre aparelhos ----------
 do $$
 declare t text;
 begin
-  foreach t in array array['ajustes','vendedoras','lives','pecas','gastos'] loop
+  foreach t in array array['ajustes','vendedoras','lives','pecas','pecas_custo','gastos'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;

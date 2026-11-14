@@ -7,8 +7,12 @@
 const Cloud = (() => {
   const cfg = window.BRECHO_CONFIG || {};
   const on = !!(cfg.supabaseUrl && cfg.supabaseKey && window.supabase);
-  const PARENTS_FIRST = ['ajustes', 'vendedoras', 'lives', 'pecas', 'gastos'];
-  const CHILDREN_FIRST = ['gastos', 'pecas', 'lives', 'vendedoras'];
+  // pecas_custo = preço pago de cada peça, numa tabela que só o DONO consegue ler (RLS).
+  // Visitantes recebem apenas a soma por live, pela função custos_por_live().
+  const PARENTS_FIRST = ['ajustes', 'vendedoras', 'lives', 'pecas', 'pecas_custo', 'gastos'];
+  const CHILDREN_FIRST = ['gastos', 'pecas_custo', 'pecas', 'lives', 'vendedoras'];
+  const KEY = t => t === 'pecas_custo' ? 'peca_id' : 'id';
+  const ORDER = t => t === 'ajustes' ? 'id' : t === 'pecas_custo' ? 'peca_id' : 'ordem';
   let sb = null, synced = null, timer = null, busy = false, again = false;
   let refreshTimer = null, status = 'idle', lastError = '', user = null, isOwner = false;
 
@@ -16,12 +20,15 @@ const Cloud = (() => {
 
   /* ---------- Conversão estado ⇄ linhas ---------- */
   function toRows(st) {
-    const r = { ajustes: new Map(), vendedoras: new Map(), lives: new Map(), pecas: new Map(), gastos: new Map() };
+    const r = emptyRows();
     r.ajustes.set('1', { id: 1, taxa: st.settings.taxa ?? null, faixas: st.settings.faixas });
     st.vendedoras.forEach((v, i) => r.vendedoras.set(v.id, { id: v.id, nome: v.nome || '', modelo: v.modelo || '', pct: v.pct ?? null, fixo: v.fixo ?? null, por_hora: v.porHora ?? null, obs: v.obs || '', ordem: i }));
     st.lives.forEach((l, i) => {
       r.lives.set(l.id, { id: l.id, nome: l.nome || '', data: l.data || null, vendedora_id: l.vendedoraId || null, horas: l.horas ?? null, ordem: i });
-      l.pecas.forEach((p, j) => r.pecas.set(p.id, { id: p.id, live_id: l.id, ref: p.ref || null, nome: p.nome || '', categoria: p.categoria || '', valor: p.valor ?? null, custo: p.custo ?? null, status: p.status || '', ordem: j }));
+      l.pecas.forEach((p, j) => {
+        r.pecas.set(p.id, { id: p.id, live_id: l.id, ref: p.ref || null, nome: p.nome || '', categoria: p.categoria || '', valor: p.valor ?? null, status: p.status || '', ordem: j });
+        if (p.custo != null) r.pecas_custo.set(p.id, { peca_id: p.id, custo: p.custo });
+      });
       l.gastos.forEach((g, j) => r.gastos.set(g.id, { id: g.id, live_id: l.id, descricao: g.desc || '', valor: g.valor ?? null, ordem: j }));
     });
     return r;
@@ -36,8 +43,10 @@ const Cloud = (() => {
       lives: d.lives.sort(byOrd).map(l => ({ id: l.id, nome: l.nome, data: l.data || '', vendedoraId: l.vendedora_id || '', horas: num(l.horas), pecas: [], gastos: [] })),
     };
     const lv = new Map(st.lives.map(l => [l.id, l]));
+    const custos = new Map((d.pecas_custo || []).map(c => [c.peca_id, num(c.custo)]));   // vazio para visitantes
+    st.custosLive = Object.fromEntries((d.custos || []).map(c => [c.live_id, num(c.custo) || 0]));
     d.pecas.sort(byOrd).forEach(p => {
-      const p2 = { id: p.id, nome: p.nome, categoria: p.categoria, valor: num(p.valor), custo: num(p.custo), status: p.status };
+      const p2 = { id: p.id, nome: p.nome, categoria: p.categoria, valor: num(p.valor), custo: custos.get(p.id) ?? null, status: p.status };
       if (p.ref) p2.ref = p.ref;
       lv.get(p.live_id)?.pecas.push(p2);
     });
@@ -45,8 +54,9 @@ const Cloud = (() => {
     return st;
   }
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const emptyRows = () => ({ ajustes: new Map(), vendedoras: new Map(), lives: new Map(), pecas: new Map(), gastos: new Map() });
+  const emptyRows = () => Object.fromEntries(PARENTS_FIRST.map(t => [t, new Map()]));
   const snap = r => JSON.stringify(PARENTS_FIRST.map(t => [...r[t]]));
+  let custosSnap = '';
   function diff(cur) {
     let n = 0;
     for (const t of PARENTS_FIRST) for (const [id, row] of cur[t]) if (!same(synced[t].get(id), row)) n++;
@@ -75,13 +85,17 @@ const Cloud = (() => {
     for (const t of PARENTS_FIRST) {
       const rows = [];
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await sb.from(t).select('*').order(t === 'ajustes' ? 'id' : 'ordem').range(from, from + 999);
+        const { data, error } = await sb.from(t).select('*').order(ORDER(t)).range(from, from + 999);
         if (error) throw error;
         rows.push(...data);
         if (data.length < 1000) break;
       }
       out[t] = rows;
     }
+    // soma do preço pago das peças vendidas, por live (liberada para todos; o valor por peça não)
+    const { data: custos, error: eC } = await sb.rpc('custos_por_live');
+    if (eC) console.warn('custos_por_live:', eC.message);
+    out.custos = custos || [];
     return out;
   }
   async function refresh(force = false) {
@@ -104,8 +118,9 @@ const Cloud = (() => {
         return flush();
       }
       const rows = toRows(novo);
-      const changed = !synced || snap(rows) !== snap(synced);
-      synced = rows;
+      const cs = JSON.stringify(novo.custosLive);
+      const changed = !synced || snap(rows) !== snap(synced) || cs !== custosSnap;
+      synced = rows; custosSnap = cs;
       if (changed || ui.loading) { state = novo; ui.loading = false; render(); }
       setStatus('ok');
     } catch (e) {
@@ -139,7 +154,7 @@ const Cloud = (() => {
       for (const t of CHILDREN_FIRST) {
         const del = [...synced[t].keys()].filter(id => !cur[t].has(id));
         for (let i = 0; i < del.length; i += 200) {
-          const { error } = await sb.from(t).delete().in('id', del.slice(i, i + 200));
+          const { error } = await sb.from(t).delete().in(KEY(t), del.slice(i, i + 200));
           if (error) throw error;
         }
       }
